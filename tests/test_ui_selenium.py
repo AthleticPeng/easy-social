@@ -33,6 +33,7 @@ def ui_app():
                 "UPLOAD_FOLDER": str(temp_path / "uploads"),
                 "MEDIA_STORAGE_BACKEND": "local",
                 "WTF_CSRF_ENABLED": False,
+                "CAPTCHA_TESTING_SHOW_ANSWER": True,
             }
         )
         with app.app_context():
@@ -128,6 +129,8 @@ def register_via_ui(browser, live_server: str, username: str):
     set_field_value(browser, form.find_element(By.NAME, "username"), username)
     set_field_value(browser, form.find_element(By.NAME, "email"), f"{username}@example.com")
     set_field_value(browser, form.find_element(By.NAME, "password"), "password")
+    captcha_input = form.find_element(By.NAME, "captcha")
+    set_field_value(browser, captcha_input, captcha_input.get_attribute("data-captcha-answer"))
     submit_form(browser, form)
     wait_for_feed(browser)
 
@@ -135,6 +138,22 @@ def register_via_ui(browser, live_server: str, username: str):
 def logout_via_ui(browser):
     submit_form(browser, browser.find_element(By.CSS_SELECTOR, "header form"))
     wait_for_login(browser)
+
+
+@pytest.mark.ui
+def test_register_blocks_invalid_captcha(browser, live_server):
+    browser.get(f"{live_server}/auth/register")
+    form = WebDriverWait(browser, 10).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "form.form-stack"))
+    )
+    set_field_value(browser, form.find_element(By.NAME, "username"), "robot")
+    set_field_value(browser, form.find_element(By.NAME, "email"), "robot@example.com")
+    set_field_value(browser, form.find_element(By.NAME, "password"), "password")
+    set_field_value(browser, form.find_element(By.NAME, "captcha"), "wrong")
+    submit_form(browser, form)
+
+    wait_for_text(browser, "CAPTCHA verification failed")
+    assert "/auth/register" in browser.current_url
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,7 @@ from easy_social.extensions import db
 from easy_social.models import Comment, Post, User
 from scripts.import_fake_data import DEFAULT_DATA_DIR, import_fake_data
 
-from conftest import login, logout, register
+from conftest import captcha_answer, login, logout, register
 
 pytestmark = pytest.mark.integration
 
@@ -27,6 +27,46 @@ def test_register_login_and_create_text_post(client, app):
         post = Post.query.filter_by(author_id=user.id).one()
         assert post.body == "Hello world"
         assert post.media_filename is None
+
+
+def test_register_rejects_invalid_captcha(client, app):
+    client.get("/auth/register")
+
+    response = client.post(
+        "/auth/register",
+        data={
+            "username": "robot",
+            "email": "robot@example.com",
+            "password": "password",
+            "captcha": "wrong",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"CAPTCHA verification failed" in response.data
+    with app.app_context():
+        assert User.query.filter_by(username="robot").first() is None
+
+
+def test_register_accepts_case_insensitive_captcha(client, app):
+    answer = captcha_answer(client)
+
+    response = client.post(
+        "/auth/register",
+        data={
+            "username": "casey",
+            "email": "casey@example.com",
+            "password": "password",
+            "captcha": f" {answer.lower()} ",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Feed" in response.data
+    with app.app_context():
+        assert User.query.filter_by(username="casey").one()
 
 
 def test_create_image_post(client, app):

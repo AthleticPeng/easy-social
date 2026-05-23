@@ -60,21 +60,37 @@ def _engine_options(database_url: str) -> dict:
     }
 
 
+def _is_vercel() -> bool:
+    return os.environ.get("VERCEL") == "1"
+
+
+def _default_database_uri(app: Flask) -> str:
+    if _is_vercel():
+        return "sqlite:////tmp/easy_social.sqlite"
+    return f"sqlite:///{Path(app.instance_path) / 'easy_social.sqlite'}"
+
+
+def _default_upload_folder(app: Flask) -> str:
+    if _is_vercel():
+        return "/tmp/easy_social_uploads"
+    return str(Path(app.root_path) / "static" / "uploads")
+
+
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__, instance_relative_config=True)
     database_url = _database_url()
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-key"),
-        SQLALCHEMY_DATABASE_URI=database_url
-        or f"sqlite:///{Path(app.instance_path) / 'easy_social.sqlite'}",
+        SQLALCHEMY_DATABASE_URI=database_url or _default_database_uri(app),
         SQLALCHEMY_ENGINE_OPTIONS=_engine_options(database_url),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        UPLOAD_FOLDER=str(Path(app.root_path) / "static" / "uploads"),
+        UPLOAD_FOLDER=_default_upload_folder(app),
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,
         MEDIA_STORAGE_BACKEND=os.environ.get("MEDIA_STORAGE_BACKEND", "local"),
         SUPABASE_URL=os.environ.get("SUPABASE_URL"),
         SUPABASE_SERVICE_ROLE_KEY=os.environ.get("SUPABASE_SERVICE_ROLE_KEY"),
         SUPABASE_STORAGE_BUCKET=os.environ.get("SUPABASE_STORAGE_BUCKET", "easy-social-media"),
+        CAPTCHA_TESTING_SHOW_ANSWER=False,
     )
 
     if test_config:
@@ -84,7 +100,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 app.config["SQLALCHEMY_DATABASE_URI"]
             )
 
-    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:///"):
+    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite:///") and not _is_vercel():
         Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     if app.config["MEDIA_STORAGE_BACKEND"] == "local":
         Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)
@@ -104,6 +120,16 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(social_bp)
     app.jinja_env.globals["media_url"] = media_url
+
+    if app.config["SQLALCHEMY_DATABASE_URI"] == "sqlite:////tmp/easy_social.sqlite":
+
+        @app.before_request
+        def ensure_tmp_database() -> None:
+            db.create_all()
+            if User.query.first() is None:
+                from scripts.import_fake_data import DEFAULT_DATA_DIR, import_fake_data
+
+                import_fake_data(DEFAULT_DATA_DIR)
 
     @app.cli.command("init-db")
     def init_db_command() -> None:

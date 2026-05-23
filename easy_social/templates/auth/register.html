@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% block title %}Register - Easy Social{% endblock %}
 {% block content %}
   <section class="auth-panel">
     <h1>Create account</h1>
@@ -16,9 +15,23 @@
         Password
         <input name="password" type="password" autocomplete="new-password" required>
       </label>
+      <label>
+        Security check
+        <span class="captcha-box">
+          <img src="{{ url_for('auth.captcha_image') }}" alt="CAPTCHA image" width="180" height="76">
+          <a href="{{ url_for('auth.register') }}">Refresh</a>
+        </span>
+        <input
+          name="captcha"
+          autocomplete="off"
+          inputmode="text"
+          maxlength="8"
+          required
+          {% if captcha_test_answer %}data-captcha-answer="{{ captcha_test_answer }}"{% endif %}
+        >
+      </label>
       <button type="submit">Register</button>
     </form>
     <p class="muted">Already registered? <a href="{{ url_for('auth.login') }}">Log in</a>.</p>
   </section>
 {% endblock %}
-

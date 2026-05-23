@@ -1,0 +1,4 @@
+e-env/
+instance/
+.pytest_cache/
+easy_social/static/uploads/
