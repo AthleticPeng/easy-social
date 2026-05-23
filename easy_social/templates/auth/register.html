@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Register - Easy Social{% endblock %}
 {% block content %}
   <section class="auth-panel">
     <h1>Create account</h1>
@@ -25,7 +26,7 @@
           name="captcha"
           autocomplete="off"
           inputmode="text"
-          maxlength="8"
+          maxlength="5"
           required
           {% if captcha_test_answer %}data-captcha-answer="{{ captcha_test_answer }}"{% endif %}
         >
