@@ -37,6 +37,7 @@ class User(UserMixin, db.Model):
 
     posts = db.relationship("Post", back_populates="author", lazy="dynamic")
     comments = db.relationship("Comment", back_populates="author", lazy="dynamic")
+    poll_votes = db.relationship("PollVote", back_populates="voter", lazy="dynamic")
     following = db.relationship(
         "User",
         secondary=followers,
@@ -84,6 +85,15 @@ class Post(db.Model):
     comments = db.relationship(
         "Comment", back_populates="post", cascade="all, delete-orphan", lazy="dynamic"
     )
+    poll_options = db.relationship(
+        "PollOption",
+        back_populates="post",
+        cascade="all, delete-orphan",
+        order_by="PollOption.position",
+    )
+    poll_votes = db.relationship(
+        "PollVote", back_populates="post", cascade="all, delete-orphan", lazy="dynamic"
+    )
     repost_of = db.relationship("Post", remote_side=[id], backref="reposts")
 
     __table_args__ = (
@@ -100,6 +110,65 @@ class Post(db.Model):
     @property
     def is_repost(self) -> bool:
         return self.repost_of_id is not None
+
+    @property
+    def is_poll(self) -> bool:
+        return bool(self.poll_options)
+
+    @property
+    def total_poll_votes(self) -> int:
+        return sum(option.vote_count for option in self.poll_options)
+
+    def poll_vote_for(self, user: User) -> "PollVote | None":
+        if not user or not getattr(user, "is_authenticated", False):
+            return None
+        return PollVote.query.filter_by(post_id=self.id, voter_id=user.id).one_or_none()
+
+
+class PollOption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.String(160), nullable=False)
+    position = db.Column(db.Integer, nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=False, index=True)
+
+    post = db.relationship("Post", back_populates="poll_options")
+    votes = db.relationship("PollVote", back_populates="option", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "position", name="uq_poll_option_position"),
+        CheckConstraint("length(text) > 0", name="ck_poll_option_text"),
+        CheckConstraint("position >= 1 AND position <= 4", name="ck_poll_option_position_range"),
+    )
+
+    @property
+    def vote_count(self) -> int:
+        return len(self.votes)
+
+    def percentage(self, total_votes: int | None = None) -> int:
+        total = self.post.total_poll_votes if total_votes is None else total_votes
+        if total == 0:
+            return 0
+        return round((self.vote_count / total) * 100)
+
+
+class PollVote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=False, index=True)
+    option_id = db.Column(db.Integer, db.ForeignKey("poll_option.id"), nullable=False, index=True)
+    voter_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+
+    post = db.relationship("Post", back_populates="poll_votes")
+    option = db.relationship("PollOption", back_populates="votes")
+    voter = db.relationship("User", back_populates="poll_votes")
+
+    __table_args__ = (
+        UniqueConstraint("post_id", "voter_id", name="uq_poll_vote_once_per_post"),
+    )
 
 
 class Comment(db.Model):
@@ -120,4 +189,3 @@ class Comment(db.Model):
     __table_args__ = (
         UniqueConstraint("author_id", "post_id", "body", name="uq_comment_duplicate_guard"),
     )
-

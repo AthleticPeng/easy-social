@@ -19,6 +19,46 @@
       <video class="post-media" controls src="{{ media_url(content.media_filename) }}"></video>
     {% endif %}
   {% endif %}
+  {% if content.is_poll %}
+    {% set user_vote = content.poll_vote_for(current_user) %}
+    {% set total_votes = content.total_poll_votes %}
+    <section class="poll" aria-label="Poll">
+      {% if user_vote %}
+        <div class="poll-results">
+          {% for option in content.poll_options %}
+            {% set percent = option.percentage(total_votes) %}
+            <div class="poll-result {% if user_vote.option_id == option.id %}selected{% endif %}">
+              <div class="poll-result-row">
+                <span>
+                  {{ option.text }}
+                  {% if user_vote.option_id == option.id %}
+                    <span class="poll-selected-label">your vote</span>
+                  {% endif %}
+                </span>
+                <strong>{{ percent }}%</strong>
+              </div>
+              <div class="poll-bar" aria-hidden="true">
+                <span style="width: {{ percent }}%"></span>
+              </div>
+              <span class="muted">{{ option.vote_count }} votes</span>
+            </div>
+          {% endfor %}
+        </div>
+        <p class="muted">{{ total_votes }} total votes</p>
+      {% else %}
+        <form method="post" action="{{ url_for('social.vote_poll', post_id=content.id) }}" class="poll-form">
+          {% for option in content.poll_options %}
+            <label class="poll-choice">
+              <input type="radio" name="option_id" value="{{ option.id }}" required>
+              <span>{{ option.text }}</span>
+            </label>
+          {% endfor %}
+          <button type="submit">Vote</button>
+        </form>
+        <p class="muted">{{ total_votes }} votes so far</p>
+      {% endif %}
+    </section>
+  {% endif %}
   <footer class="post-actions">
     <a href="{{ url_for('social.post_detail', post_id=content.id) }}">{{ comment_counts[content.id] if comment_counts is defined and content.id in comment_counts else content.comments.count() }} comments</a>
     {% if content.author_id != current_user.id %}

@@ -210,6 +210,30 @@ def test_user_can_register_create_post_and_comment(browser, live_server):
 
 
 @pytest.mark.ui
+def test_user_can_create_and_vote_poll(browser, live_server):
+    register_via_ui(browser, live_server, "poller")
+
+    composer = browser.find_element(By.CSS_SELECTOR, "form.composer")
+    set_field_value(browser, composer.find_element(By.NAME, "body"), "Choose a feature")
+    poll_options = composer.find_elements(By.NAME, "poll_options")
+    set_field_value(browser, poll_options[0], "Poll posts")
+    set_field_value(browser, poll_options[1], "Profile badges")
+    submit_form(browser, composer)
+    wait_for_text(browser, "Choose a feature")
+    wait_for_text(browser, "Poll posts")
+    logout_via_ui(browser)
+
+    register_via_ui(browser, live_server, "voter")
+    browser.get(f"{live_server}/explore")
+    wait_for_text(browser, "Choose a feature")
+    poll_form = browser.find_element(By.CSS_SELECTOR, "form.poll-form")
+    poll_form.find_elements(By.NAME, "option_id")[0].click()
+    submit_form(browser, poll_form)
+    wait_for_text(browser, "100%")
+    wait_for_text(browser, "your vote")
+
+
+@pytest.mark.ui
 def test_following_user_adds_their_posts_to_feed(browser, live_server):
     register_via_ui(browser, live_server, "bob")
     composer = browser.find_element(By.CSS_SELECTOR, "form.composer")

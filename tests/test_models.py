@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 import pytest
 
 from easy_social.extensions import db
-from easy_social.models import Post, User
+from easy_social.models import PollOption, PollVote, Post, User
 
 pytestmark = pytest.mark.unit
 
@@ -90,3 +90,54 @@ def test_repost_display_post_points_to_original(app):
         assert original.display_post == original
         assert repost.is_repost
         assert repost.display_post == original
+
+
+def test_poll_vote_percentages(app):
+    with app.app_context():
+        alice = make_user("alice")
+        bob = make_user("bob")
+        casey = make_user("casey")
+        poll = Post(author=alice, body="Which feature next?")
+        option_a = PollOption(text="Polls", position=1)
+        option_b = PollOption(text="Themes", position=2)
+        poll.poll_options.extend([option_a, option_b])
+        db.session.add_all([alice, bob, casey, poll])
+        db.session.flush()
+        db.session.add_all(
+            [
+                PollVote(post=poll, option=option_a, voter=bob),
+                PollVote(post=poll, option=option_b, voter=casey),
+            ]
+        )
+        db.session.commit()
+
+        assert poll.is_poll
+        assert poll.total_poll_votes == 2
+        assert option_a.vote_count == 1
+        assert option_a.percentage() == 50
+        assert option_b.percentage() == 50
+
+
+def test_user_can_vote_once_per_poll(app):
+    with app.app_context():
+        alice = make_user("alice")
+        bob = make_user("bob")
+        poll = Post(author=alice, body="Choose one")
+        option_a = PollOption(text="A", position=1)
+        option_b = PollOption(text="B", position=2)
+        poll.poll_options.extend([option_a, option_b])
+        db.session.add_all([alice, bob, poll])
+        db.session.flush()
+        db.session.add_all(
+            [
+                PollVote(post=poll, option=option_a, voter=bob),
+                PollVote(post=poll, option=option_b, voter=bob),
+            ]
+        )
+
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+        else:
+            raise AssertionError("user should not be able to vote twice in one poll")

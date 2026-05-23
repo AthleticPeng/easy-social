@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import event
 
 from easy_social.extensions import db
-from easy_social.models import Comment, Post, User
+from easy_social.models import Comment, PollOption, PollVote, Post, User
 from scripts.import_fake_data import DEFAULT_DATA_DIR, import_fake_data
 
 from conftest import captcha_answer, login, logout, register
@@ -87,6 +87,80 @@ def test_create_image_post(client, app):
         post = Post.query.one()
         assert post.media_type == "image"
         assert post.media_filename.endswith(".png")
+
+
+def test_create_poll_post(client, app):
+    register(client, "alice")
+
+    response = client.post(
+        "/posts",
+        data={
+            "body": "What should we build next?",
+            "poll_options": ["Polls", "Dark mode", "", "Exports"],
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"What should we build next?" in response.data
+    assert b"Polls" in response.data
+    assert b"Vote" in response.data
+    with app.app_context():
+        post = Post.query.filter_by(body="What should we build next?").one()
+        assert [option.text for option in post.poll_options] == ["Polls", "Dark mode", "Exports"]
+
+
+def test_create_poll_requires_two_options(client, app):
+    register(client, "alice")
+
+    response = client.post(
+        "/posts",
+        data={"body": "Is one enough?", "poll_options": ["Only one", "", "", ""]},
+        follow_redirects=True,
+    )
+
+    assert b"Poll posts need 2 to 4 options." in response.data
+    with app.app_context():
+        assert Post.query.filter_by(body="Is one enough?").first() is None
+
+
+def test_vote_poll_shows_results_and_blocks_duplicate(client, app):
+    register(client, "alice")
+    client.post(
+        "/posts",
+        data={"body": "Pick a stack", "poll_options": ["Flask", "Django"]},
+        follow_redirects=True,
+    )
+    logout(client)
+    register(client, "bob")
+
+    with app.app_context():
+        post = Post.query.filter_by(body="Pick a stack").one()
+        option = PollOption.query.filter_by(post_id=post.id, text="Flask").one()
+        post_id = post.id
+        option_id = option.id
+
+    first_vote = client.post(
+        f"/posts/{post_id}/poll-votes",
+        data={"option_id": option_id},
+        follow_redirects=True,
+    )
+
+    assert first_vote.status_code == 200
+    assert b"100%" in first_vote.data
+    assert b"your vote" in first_vote.data
+    with app.app_context():
+        assert PollVote.query.filter_by(post_id=post_id).count() == 1
+
+    duplicate_vote = client.post(
+        f"/posts/{post_id}/poll-votes",
+        data={"option_id": option_id},
+        follow_redirects=True,
+    )
+
+    assert b"You already voted in this poll." in duplicate_vote.data
+    with app.app_context():
+        assert PollVote.query.filter_by(post_id=post_id).count() == 1
 
 
 def test_following_adds_users_posts_to_feed(client, app):
