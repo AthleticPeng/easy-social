@@ -7,7 +7,7 @@ from sqlalchemy.orm import joinedload
 
 from .extensions import db
 from .media import save_media
-from .models import Comment, Post, User, followers
+from .models import Comment, PollOption, PollVote, Post, User, followers
 
 bp = Blueprint("social", __name__)
 
@@ -16,7 +16,17 @@ def _post_query():
     return Post.query.options(
         joinedload(Post.author),
         joinedload(Post.repost_of).joinedload(Post.author),
+        joinedload(Post.poll_options).joinedload(PollOption.votes),
+        joinedload(Post.repost_of).joinedload(Post.poll_options).joinedload(PollOption.votes),
     )
+
+
+def _poll_options_from_form() -> list[str]:
+    return [
+        value.strip()
+        for value in request.form.getlist("poll_options")
+        if value.strip()
+    ]
 
 
 def _comment_counts_for_posts(posts: list[Post]) -> dict[int, int]:
@@ -89,11 +99,24 @@ def explore():
 @login_required
 def create_post():
     body = request.form.get("body", "").strip()
+    poll_options = _poll_options_from_form()
 
     try:
         media_filename, media_type = save_media(request.files.get("media"))
     except ValueError as exc:
         flash(str(exc), "error")
+        return redirect(request.referrer or url_for("social.feed"))
+
+    if poll_options and media_filename:
+        flash("Poll posts cannot include media attachments.", "error")
+        return redirect(request.referrer or url_for("social.feed"))
+
+    if poll_options and not body:
+        flash("Add a question before creating a poll.", "error")
+        return redirect(request.referrer or url_for("social.feed"))
+
+    if poll_options and not 2 <= len(poll_options) <= 4:
+        flash("Poll posts need 2 to 4 options.", "error")
         return redirect(request.referrer or url_for("social.feed"))
 
     if not body and not media_filename:
@@ -106,9 +129,32 @@ def create_post():
         media_type=media_type,
         author=current_user,
     )
+    for position, option_text in enumerate(poll_options, start=1):
+        post.poll_options.append(PollOption(text=option_text, position=position))
     db.session.add(post)
     db.session.commit()
     return redirect(url_for("social.feed"))
+
+
+@bp.post("/posts/<int:post_id>/poll-votes")
+@login_required
+def vote_poll(post_id: int):
+    post = _post_query().filter(Post.id == post_id).first_or_404().display_post
+    option_id = request.form.get("option_id", type=int)
+    option = next((option for option in post.poll_options if option.id == option_id), None)
+
+    if not post.is_poll:
+        flash("This post is not a poll.", "error")
+    elif option is None:
+        flash("Choose a valid poll option.", "error")
+    elif post.poll_vote_for(current_user):
+        flash("You already voted in this poll.", "error")
+    else:
+        db.session.add(PollVote(post_id=post.id, option_id=option.id, voter_id=current_user.id))
+        db.session.commit()
+        flash("Your vote was recorded.", "success")
+
+    return redirect(request.referrer or url_for("social.post_detail", post_id=post.id))
 
 
 @bp.get("/posts/<int:post_id>")
